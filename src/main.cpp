@@ -1,157 +1,107 @@
 #include <Arduino.h>
-#include "../src/io/IO.hpp"
+#include "io/IO.hpp"
+#include "ui/UI.hpp"
 
-// Example showing how to use the new dynamic IO system
+// Progress bar state
+int progressValue = 50;  // Start at 50%
+bool needsDisplayUpdate = true;
+unsigned long lastDisplayUpdate = 0;
+const unsigned long DISPLAY_UPDATE_INTERVAL = 250;  // Update display every 250ms (e-paper is slower)
+
+// Forward declarations
+void updateDisplay();
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    Serial.println("Starting IO Manager Example");
+    Serial.println("Starting Progress Bar Controller with E-Paper Display");
+
+    // Initialize UI system first
+    UI& ui = UI::getInstance();
+    ui.initialize();
 
     // Get the IO manager instance
     IO& io = IO::getInstance();
 
-    // Add a main rotary encoder with button
-    RotaryEncoder::Config mainEncoderConfig;
-    mainEncoderConfig.pinA = 32;
-    mainEncoderConfig.pinB = 33;
-    mainEncoderConfig.buttonPin = 25;
-    mainEncoderConfig.hasButton = true;
-    mainEncoderConfig.enablePullups = true;
+    // Configure single rotary encoder
+    RotaryEncoder::Config encoderConfig;
+    encoderConfig.pinA = 32;
+    encoderConfig.pinB = 33;
+    encoderConfig.buttonPin = 25;
+    encoderConfig.hasButton = true;
+    encoderConfig.enablePullups = true;
+    encoderConfig.reversed = false;  // Change this if encoder direction is wrong
 
-    RotaryEncoder* mainEncoder = io.addRotaryEncoder("main_encoder", mainEncoderConfig);
+    RotaryEncoder* encoder = io.addRotaryEncoder("progress_encoder", encoderConfig);
 
-    // Add a secondary encoder without button for volume control
-    RotaryEncoder::Config volumeEncoderConfig;
-    volumeEncoderConfig.pinA = 26;
-    volumeEncoderConfig.pinB = 27;
-    volumeEncoderConfig.hasButton = false;
-    volumeEncoderConfig.enablePullups = true;
+    // Set up encoder callbacks
+    if (encoder) {
+        encoder->setEncoderCallback([](int delta) {
+            // Update progress value with encoder movement
+            progressValue += delta;
 
-    RotaryEncoder* volumeEncoder = io.addRotaryEncoder("volume_encoder", volumeEncoderConfig);
+            // Clamp to 0-100 range
+            if (progressValue < 0) progressValue = 0;
+            if (progressValue > 100) progressValue = 100;
 
-    // Add standalone buttons
-    Button::Config button1Config;
-    button1Config.pin = 14;
-    button1Config.enablePullup = true;
-    button1Config.activeLow = true;
+            needsDisplayUpdate = true;
 
-    Button* button1 = io.addButton("button1", button1Config);
-
-    Button::Config button2Config;
-    button2Config.pin = 12;
-    button2Config.enablePullup = true;
-    button2Config.activeLow = true;
-
-    Button* button2 = io.addButton("button2", button2Config);
-
-    // Set up callbacks for specific devices
-    if (mainEncoder) {
-        mainEncoder->setEncoderCallback([](int delta) {
-            Serial.printf("Main Encoder moved: %d\n", delta);
+            Serial.printf("Progress: %d%% (delta: %d)\n", progressValue, delta);
         });
 
-        mainEncoder->setButtonCallback([](bool pressed) {
-            Serial.printf("Main Encoder button %s\n", pressed ? "pressed" : "released");
+        encoder->setButtonCallback([](bool pressed) {
+            if (pressed) {
+                // Reset to 50% when button is pressed
+                progressValue = 50;
+                needsDisplayUpdate = true;
+                Serial.println("Progress reset to 50%");
+            }
         });
     }
-
-    if (volumeEncoder) {
-        volumeEncoder->setEncoderCallback([](int delta) {
-            Serial.printf("Volume changed: %d\n", delta);
-        });
-    }
-
-    if (button1) {
-        button1->setCallback([](bool pressed) {
-            Serial.printf("Button 1 %s\n", pressed ? "pressed" : "released");
-        });
-    }
-
-    if (button2) {
-        button2->setCallback([](bool pressed) {
-            Serial.printf("Button 2 %s\n", pressed ? "pressed" : "released");
-        });
-    }
-
-    // Set up global input callback
-    io.setGlobalInputCallback([](const String& deviceId, InputDevice::DeviceType type) {
-        Serial.printf("Input detected from device: %s (type: %d)\n",
-                      deviceId.c_str(), static_cast<int>(type));
-    });
 
     // Initialize the IO system
     io.initialize();
 
-    Serial.println("IO system initialized with multiple devices:");
-    auto deviceIds = io.getDeviceIds();
-    for (const String& id : deviceIds) {
-        Serial.printf("- Device: %s\n", id.c_str());
-    }
+    // Set to progress bar screen
+    ui.setCurrentScreen(7);  // SCREEN_PROGRESS_BAR
+
+    Serial.println("Progress bar controller initialized");
+    Serial.println("- Turn encoder to adjust progress (0-100%)");
+    Serial.println("- Press encoder button to reset to 50%");
+    Serial.println("- Progress displayed on e-paper screen");
+
+    // Initial display update
+    updateDisplay();
 }
 
 void loop() {
     // Update all input devices
     IO::getInstance().update();
 
-    // Example of specific device access
-    static unsigned long lastCheck = 0;
-    if (millis() - lastCheck > 10000) {  // Check every second
-        lastCheck = millis();
-
-        // Access specific devices by name
-        RotaryEncoder* mainEncoder = IO::getInstance().getRotaryEncoder("main_encoder");
-        if (mainEncoder) {
-            Serial.printf("Main encoder position: %ld\n", mainEncoder->getPosition());
-        }
-
-        RotaryEncoder* volumeEncoder = IO::getInstance().getRotaryEncoder("volume_encoder");
-        if (volumeEncoder) {
-            Serial.printf("Volume encoder position: %ld\n", volumeEncoder->getPosition());
-        }
-
-        // Check button states
-        Button* button1 = IO::getInstance().getButton("button1");
-        if (button1 && button1->isPressed()) {
-            Serial.printf("Button 1 held for %lu ms\n", button1->getPressedDuration());
-        }
+    // Update display if needed and enough time has passed
+    unsigned long currentTime = millis();
+    if (needsDisplayUpdate && (currentTime - lastDisplayUpdate) >= DISPLAY_UPDATE_INTERVAL) {
+        updateDisplay();
+        needsDisplayUpdate = false;
+        lastDisplayUpdate = currentTime;
     }
 
-    // Example of using the generic interface
-    if (IO::getInstance().hasNewInput()) {
-        Serial.println("Some input device has new input!");
-
-        // Clear all input flags at once
-        IO::getInstance().clearAllInputFlags();
-    }
-
-    delay(10);  // Small delay for stability
+    delay(1);  // Small delay for stability
 }
 
-// Alternative example showing dynamic device management
-void alternativeExample() {
-    // IO& io = IO::getInstance();
+void updateDisplay() {
+    // Update the e-paper display progress bar
+    UI& ui = UI::getInstance();
 
-    // Serial.println("\n=== Dynamic Device Management Example ===");
+    // Use partial update for fast refresh (if supported)
+    // Force full update every 20 updates to prevent ghosting
+    static int updateCount = 0;
+    updateCount++;
+    bool forceFullUpdate = (updateCount % 20 == 0);
 
-    // // Add devices dynamically
-    // auto encoder1 = RotaryEncoder::create("dynamic_encoder", {});
-    // auto button3 = Button::create("dynamic_button", {.pin = 13});
+    ui.updateProgressBar(progressValue, forceFullUpdate);
 
-    // // Add to manager
-    // io.addDevice(std::move(encoder1));
-    // io.addDevice(std::move(button3));
-
-    // // Later, remove a device
-    // if (io.hasDevice("dynamic_button")) {
-    //     Serial.println("Removing dynamic button");
-    //     io.removeDevice("dynamic_button");
-    // }
-
-    // // Get all devices of a specific type
-    // auto allEncoders = io.getDevicesOfType<RotaryEncoder>();
-    // Serial.printf("Found %d rotary encoders\n", allEncoders.size());
-
-    // auto allButtons = io.getDevicesOfType<Button>();
-    // Serial.printf("Found %d buttons\n", allButtons.size());
+    // Also show in serial for debugging
+    Serial.printf("Display updated: %d%%\n", progressValue);
 }

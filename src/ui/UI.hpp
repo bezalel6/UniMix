@@ -46,6 +46,11 @@ class UI {
     void showSettingsScreen();
     void showStatusScreen();
     void showNetworkScreen();
+    void showProgressBarScreen();
+
+    // Progress bar specific methods
+    void updateProgressBar(int value, bool forceFullUpdate = false);
+    void drawProgressBar(int value, uint16_t x, uint16_t y, uint16_t width, uint16_t height);
 
     // Display utility methods
     void setRotation(uint16_t rotation);
@@ -88,7 +93,8 @@ class UI {
     static const int SCREEN_SETTINGS = 4;
     static const int SCREEN_STATUS = 5;
     static const int SCREEN_NETWORK = 6;
-    static const int MAX_SCREENS = 7;
+    static const int SCREEN_PROGRESS_BAR = 7;
+    static const int MAX_SCREENS = 8;
 
     // Internal methods
     void setupDisplay();

@@ -198,6 +198,7 @@ void UI::showMainMenu() {
         displayTextCenteredAt("4. Settings", display->height() * 5 / 8);
         displayTextCenteredAt("5. Status", display->height() * 3 / 4);
         displayTextCenteredAt("6. Network", display->height() * 7 / 8);
+        displayTextCenteredAt("7. Progress Bar", display->height() * 8 / 9);
     } while (display->nextPage());
 
     currentScreen = SCREEN_MAIN_MENU;
@@ -288,6 +289,9 @@ void UI::updateScreen() {
             break;
         case SCREEN_NETWORK:
             showNetworkScreen();
+            break;
+        case SCREEN_PROGRESS_BAR:
+            showProgressBarScreen();
             break;
         default:
             showMainMenu();
@@ -576,5 +580,131 @@ void UI::displayNetworkStatus(uint16_t x, uint16_t y, bool compact) {
                 displayTextCenteredAt(attempts.c_str(), currentY);
             }
         }
+    }
+}
+
+void UI::showProgressBarScreen() {
+    if (!initialized || !display) return;
+
+    display->setRotation(currentRotation);
+    display->setFont(&FreeMonoBold9pt7b);
+    display->setTextColor(GxEPD_BLACK);
+    display->setFullWindow();
+
+    display->firstPage();
+    do {
+        display->fillScreen(GxEPD_WHITE);
+
+        // Title
+        displayTextCenteredAt("PROGRESS CONTROL", display->height() / 8);
+
+        // Instructions
+        display->setFont(0);  // Smaller font for instructions
+        displayTextCenteredAt("Turn encoder to adjust", display->height() / 4);
+        displayTextCenteredAt("Press button to reset", display->height() / 4 + 15);
+
+        // Progress bar area (will be updated separately)
+        display->setFont(&FreeMonoBold9pt7b);  // Restore main font
+        displayTextCenteredAt("Progress:", display->height() / 2);
+
+        // Draw initial progress bar at 50%
+        uint16_t barWidth = display->width() - 40;
+        uint16_t barHeight = 30;
+        uint16_t barX = (display->width() - barWidth) / 2;
+        uint16_t barY = display->height() * 5 / 8;
+
+        drawProgressBar(50, barX, barY, barWidth, barHeight);
+
+    } while (display->nextPage());
+
+    currentScreen = SCREEN_PROGRESS_BAR;
+}
+
+void UI::updateProgressBar(int value, bool forceFullUpdate) {
+    if (!initialized || !display || currentScreen != SCREEN_PROGRESS_BAR) return;
+
+    // Progress bar dimensions
+    uint16_t barWidth = display->width() - 40;
+    uint16_t barHeight = 30;
+    uint16_t barX = (display->width() - barWidth) / 2;
+    uint16_t barY = display->height() * 5 / 8;
+
+    // Value text area
+    uint16_t valueY = barY + barHeight + 25;
+
+    if (forceFullUpdate) {
+        // Full screen update
+        display->setFullWindow();
+        display->firstPage();
+        do {
+            display->fillScreen(GxEPD_WHITE);
+
+            // Redraw the entire screen
+            display->setFont(&FreeMonoBold9pt7b);
+            display->setTextColor(GxEPD_BLACK);
+
+            displayTextCenteredAt("PROGRESS CONTROL", display->height() / 8);
+
+            display->setFont(0);
+            displayTextCenteredAt("Turn encoder to adjust", display->height() / 4);
+            displayTextCenteredAt("Press button to reset", display->height() / 4 + 15);
+
+            display->setFont(&FreeMonoBold9pt7b);
+            displayTextCenteredAt("Progress:", display->height() / 2);
+
+            drawProgressBar(value, barX, barY, barWidth, barHeight);
+
+            // Display percentage
+            String valueStr = String(value) + "%";
+            displayTextCenteredAt(valueStr.c_str(), valueY);
+
+        } while (display->nextPage());
+    } else {
+        // Partial update for just the progress bar and value
+        uint16_t updateX = barX - 5;
+        uint16_t updateY = barY - 5;
+        uint16_t updateW = barWidth + 10;
+        uint16_t updateH = barHeight + 40;  // Include space for percentage text
+
+        display->setPartialWindow(updateX, updateY, updateW, updateH);
+        display->firstPage();
+        do {
+            // Clear the update area
+            display->fillRect(updateX, updateY, updateW, updateH, GxEPD_WHITE);
+
+            // Redraw progress bar
+            drawProgressBar(value, barX, barY, barWidth, barHeight);
+
+            // Display percentage
+            display->setFont(&FreeMonoBold9pt7b);
+            display->setTextColor(GxEPD_BLACK);
+            String valueStr = String(value) + "%";
+            displayTextCenteredAt(valueStr.c_str(), valueY);
+
+        } while (display->nextPage());
+    }
+}
+
+void UI::drawProgressBar(int value, uint16_t x, uint16_t y, uint16_t width, uint16_t height) {
+    if (!display) return;
+
+    // Clamp value to 0-100
+    if (value < 0) value = 0;
+    if (value > 100) value = 100;
+
+    // Draw outer border
+    display->drawRect(x, y, width, height, GxEPD_BLACK);
+
+    // Calculate filled width
+    uint16_t fillWidth = ((width - 4) * value) / 100;  // -4 for 2px border on each side
+
+    // Draw filled portion
+    if (fillWidth > 0) {
+        display->fillRect(x + 2, y + 2, fillWidth, height - 4, GxEPD_BLACK);
+    }
+
+    // Draw empty portion
+    if (fillWidth < width - 4) {
+        display->fillRect(x + 2 + fillWidth, y + 2, width - 4 - fillWidth, height - 4, GxEPD_WHITE);
     }
 }
