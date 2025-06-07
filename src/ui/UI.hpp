@@ -45,6 +45,7 @@ class UI {
     void showMainMenu();
     void showSettingsScreen();
     void showStatusScreen();
+    void showNetworkScreen();
 
     // Display utility methods
     void setRotation(uint16_t rotation);
@@ -55,6 +56,8 @@ class UI {
     void displayText(const char* text, uint16_t x, uint16_t y, bool centered = false);
     void displayTextCentered(const char* text);
     void displayTextCenteredAt(const char* text, uint16_t y);
+    void displayNetworkStatus(uint16_t x, uint16_t y, bool compact = false);
+    void displayNetworkIndicator();
 
     // Screen navigation
     void nextScreen();
@@ -84,7 +87,8 @@ class UI {
     static const int SCREEN_MAIN_MENU = 3;
     static const int SCREEN_SETTINGS = 4;
     static const int SCREEN_STATUS = 5;
-    static const int MAX_SCREENS = 6;
+    static const int SCREEN_NETWORK = 6;
+    static const int MAX_SCREENS = 7;
 
     // Internal methods
     void setupDisplay();

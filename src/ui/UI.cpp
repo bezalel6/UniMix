@@ -1,4 +1,5 @@
 #include "UI.hpp"
+#include "../network/network.hpp"
 
 // Initialize static member
 UI* UI::instance = nullptr;
@@ -190,11 +191,13 @@ void UI::showMainMenu() {
     display->firstPage();
     do {
         display->fillScreen(GxEPD_WHITE);
-        displayTextCenteredAt("MAIN MENU", display->height() / 6);
-        displayTextCenteredAt("1. Hello World", display->height() / 3);
-        displayTextCenteredAt("2. Partial Mode", display->height() / 2);
-        displayTextCenteredAt("3. Partial Demo", display->height() * 2 / 3);
-        displayTextCenteredAt("4. Settings", display->height() * 5 / 6);
+        displayTextCenteredAt("MAIN MENU", display->height() / 8);
+        displayTextCenteredAt("1. Hello World", display->height() / 4);
+        displayTextCenteredAt("2. Partial Mode", display->height() * 3 / 8);
+        displayTextCenteredAt("3. Partial Demo", display->height() / 2);
+        displayTextCenteredAt("4. Settings", display->height() * 5 / 8);
+        displayTextCenteredAt("5. Status", display->height() * 3 / 4);
+        displayTextCenteredAt("6. Network", display->height() * 7 / 8);
     } while (display->nextPage());
 
     currentScreen = SCREEN_MAIN_MENU;
@@ -230,11 +233,14 @@ void UI::showStatusScreen() {
     display->firstPage();
     do {
         display->fillScreen(GxEPD_WHITE);
-        displayTextCenteredAt("STATUS", display->height() / 6);
-        displayTextCenteredAt(("Width: " + String(display->width())).c_str(), display->height() / 3);
-        displayTextCenteredAt(("Height: " + String(display->height())).c_str(), display->height() / 2);
-        displayTextCenteredAt(("Partial: " + String(hasPartialUpdate() ? "YES" : "NO")).c_str(), display->height() * 2 / 3);
-        displayTextCenteredAt(("Fast Partial: " + String(hasFastPartialUpdate() ? "YES" : "NO")).c_str(), display->height() * 5 / 6);
+        displayTextCenteredAt("STATUS", display->height() / 8);
+        displayTextCenteredAt(("Width: " + String(display->width())).c_str(), display->height() / 4);
+        displayTextCenteredAt(("Height: " + String(display->height())).c_str(), display->height() * 3 / 8);
+        displayTextCenteredAt(("Partial: " + String(hasPartialUpdate() ? "YES" : "NO")).c_str(), display->height() / 2);
+        displayTextCenteredAt(("Fast Partial: " + String(hasFastPartialUpdate() ? "YES" : "NO")).c_str(), display->height() * 5 / 8);
+
+        // Display network status at bottom
+        displayNetworkStatus(0, display->height() * 3 / 4, true);
     } while (display->nextPage());
 
     currentScreen = SCREEN_STATUS;
@@ -280,6 +286,9 @@ void UI::updateScreen() {
         case SCREEN_STATUS:
             showStatusScreen();
             break;
+        case SCREEN_NETWORK:
+            showNetworkScreen();
+            break;
         default:
             showMainMenu();
             break;
@@ -320,6 +329,50 @@ void UI::displayTextCenteredAt(const char* text, uint16_t y) {
     uint16_t x = ((display->width() - tbw) / 2) - tbx;
     display->setCursor(x, y);
     display->print(text);
+
+    // Add network status indicator in top-right corner (except on network screen)
+    if (currentScreen != SCREEN_NETWORK) {
+        displayNetworkIndicator();
+    }
+}
+
+void UI::displayNetworkIndicator() {
+    if (!display) return;
+
+    Network& network = Network::getInstance();
+
+    // Use a small font for the indicator
+    display->setFont(0);  // Default small font
+
+    // Position in top-right corner
+    const char* indicator;
+    switch (network.getStatus()) {
+        case NetworkStatus::CONNECTED:
+            indicator = "WiFi";
+            break;
+        case NetworkStatus::CONNECTING:
+        case NetworkStatus::RECONNECTING:
+            indicator = "...";
+            break;
+        case NetworkStatus::DISCONNECTED:
+        case NetworkStatus::FAILED:
+        default:
+            indicator = "X";
+            break;
+    }
+
+    // Calculate position (top-right corner)
+    int16_t tbx, tby;
+    uint16_t tbw, tbh;
+    display->getTextBounds(indicator, 0, 0, &tbx, &tby, &tbw, &tbh);
+    uint16_t x = display->width() - tbw - 5;  // 5 pixels from right edge
+    uint16_t y = tbh + 5;                     // 5 pixels from top edge
+
+    display->setCursor(x, y);
+    display->print(indicator);
+
+    // Restore the main font
+    display->setFont(&FreeMonoBold9pt7b);
 }
 
 // Screen navigation
@@ -449,5 +502,79 @@ void UI::animatePartialUpdates() {
             display->fillRect(box_x, box_y, box_w, box_h, GxEPD_WHITE);
         } while (display->nextPage());
         delay(1000);
+    }
+}
+
+void UI::showNetworkScreen() {
+    if (!initialized || !display) return;
+
+    display->setRotation(currentRotation);
+    display->setFont(&FreeMonoBold9pt7b);
+    display->setTextColor(GxEPD_BLACK);
+    display->setFullWindow();
+
+    display->firstPage();
+    do {
+        display->fillScreen(GxEPD_WHITE);
+        displayTextCenteredAt("NETWORK", display->height() / 8);
+
+        // Display detailed network status
+        displayNetworkStatus(0, display->height() / 4, false);
+    } while (display->nextPage());
+
+    currentScreen = SCREEN_NETWORK;
+}
+
+void UI::displayNetworkStatus(uint16_t x, uint16_t y, bool compact) {
+    if (!display) return;
+
+    Network& network = Network::getInstance();
+
+    if (compact) {
+        // Compact display for status screen
+        String status = "Net: " + String(network.getStatusString());
+        displayTextCenteredAt(status.c_str(), y);
+
+        if (network.isConnected()) {
+            String ip = "IP: " + network.getLocalIP();
+            displayTextCenteredAt(ip.c_str(), y + 20);
+        }
+    } else {
+        // Detailed display for network screen
+        uint16_t lineHeight = 25;
+        uint16_t currentY = y;
+
+        // Status
+        String status = "Status: " + String(network.getStatusString());
+        displayTextCenteredAt(status.c_str(), currentY);
+        currentY += lineHeight;
+
+        // SSID
+        String ssid = "SSID: " + network.getSSID();
+        displayTextCenteredAt(ssid.c_str(), currentY);
+        currentY += lineHeight;
+
+        if (network.isConnected()) {
+            // IP Address
+            String ip = "IP: " + network.getLocalIP();
+            displayTextCenteredAt(ip.c_str(), currentY);
+            currentY += lineHeight;
+
+            // Signal strength
+            String rssi = "RSSI: " + String(network.getRSSI()) + " dBm";
+            displayTextCenteredAt(rssi.c_str(), currentY);
+            currentY += lineHeight;
+
+            // Connection time
+            unsigned long connTime = network.getConnectedTime() / 1000;
+            String uptime = "Up: " + String(connTime) + "s";
+            displayTextCenteredAt(uptime.c_str(), currentY);
+        } else {
+            // Show reconnection attempts if disconnected
+            if (network.getReconnectAttempts() > 0) {
+                String attempts = "Attempts: " + String(network.getReconnectAttempts());
+                displayTextCenteredAt(attempts.c_str(), currentY);
+            }
+        }
     }
 }

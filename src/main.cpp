@@ -1,5 +1,6 @@
 #include "ui/UI.hpp"
 #include "io/IO.hpp"
+#include "network/network.hpp"
 
 // ESP32 CS(SS)=5,SCL(SCK)=18,SDA(MOSI)=23,BUSY=15,RES(RST)=2,DC=0
 
@@ -24,9 +25,10 @@ const unsigned long UPDATE_INTERVAL = 50;  // Update every 50ms
 void setup() {
     Serial.begin(115200);
 
-    // Initialize both UI and IO singletons
+    // Initialize UI, IO, and Network singletons
     UI& ui = UI::getInstance();
     IO& io = IO::getInstance();
+    Network& network = Network::getInstance();
 
     // Configure IO pins (optional - uses defaults if not called)
     // io.setEncoderPins(32, 33, 25); // A, B, Button pins
@@ -34,6 +36,11 @@ void setup() {
     // Initialize systems
     ui.initialize();
     io.initialize();
+    network.initialize();
+
+    // Connect to WiFi
+    Serial.println("Connecting to WiFi...");
+    network.connect();
 
     Serial.println("UniMix System Initialized");
     Serial.println("Use rotary encoder to navigate:");
@@ -49,9 +56,12 @@ void setup() {
 
 void handleButtonPress(), handleUserInput();
 void loop() {
-    // Update IO state
+    // Update IO and Network state
     IO& io = IO::getInstance();
+    Network& network = Network::getInstance();
+
     io.update();
+    network.update();
 
     // Check for input and update UI accordingly
     handleUserInput();
@@ -139,6 +149,11 @@ void handleButtonPress() {
         case 5:  // Status screen
             Serial.println("Action: Refreshing status");
             ui.showStatusScreen();
+            break;
+
+        case 6:  // Network screen
+            Serial.println("Action: Refreshing network status");
+            ui.showNetworkScreen();
             break;
 
         default:
