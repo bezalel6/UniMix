@@ -3,13 +3,18 @@
 #include "ui/UI.hpp"
 
 // Progress bar state
-int progressValue = 50;  // Start at 50%
+int targetProgressValue = 50;        // Target value from encoder
+float currentProgressValue = 50.0f;  // Current animated value
 bool needsDisplayUpdate = true;
 unsigned long lastDisplayUpdate = 0;
-const unsigned long DISPLAY_UPDATE_INTERVAL = 250;  // Update display every 250ms (e-paper is slower)
+unsigned long lastAnimationUpdate = 0;
+const unsigned long DISPLAY_UPDATE_INTERVAL = 100;   // Update display every 100ms for better responsiveness
+const unsigned long ANIMATION_UPDATE_INTERVAL = 16;  // Update animation every 16ms (60 FPS)
+const float ANIMATION_SPEED = 12.0f;                 // Progress units per animation frame (much faster)
 
 // Forward declarations
 void updateDisplay();
+void updateAnimation();
 
 void setup() {
     Serial.begin(115200);
@@ -38,24 +43,21 @@ void setup() {
     // Set up encoder callbacks
     if (encoder) {
         encoder->setEncoderCallback([](int delta) {
-            // Update progress value with encoder movement
-            progressValue += delta;
+            // Update target progress value with encoder movement
+            targetProgressValue += delta;
 
             // Clamp to 0-100 range
-            if (progressValue < 0) progressValue = 0;
-            if (progressValue > 100) progressValue = 100;
+            if (targetProgressValue < 0) targetProgressValue = 0;
+            if (targetProgressValue > 100) targetProgressValue = 100;
 
-            needsDisplayUpdate = true;
-
-            Serial.printf("Progress: %d%% (delta: %d)\n", progressValue, delta);
+            Serial.printf("Target Progress: %d%% (delta: %d)\n", targetProgressValue, delta);
         });
 
         encoder->setButtonCallback([](bool pressed) {
             if (pressed) {
                 // Reset to 50% when button is pressed
-                progressValue = 50;
-                needsDisplayUpdate = true;
-                Serial.println("Progress reset to 50%");
+                targetProgressValue = 50;
+                Serial.println("Target progress reset to 50%");
             }
         });
     }
@@ -79,8 +81,15 @@ void loop() {
     // Update all input devices
     IO::getInstance().update();
 
-    // Update display if needed and enough time has passed
     unsigned long currentTime = millis();
+
+    // Update animation at regular intervals
+    if ((currentTime - lastAnimationUpdate) >= ANIMATION_UPDATE_INTERVAL) {
+        updateAnimation();
+        lastAnimationUpdate = currentTime;
+    }
+
+    // Update display if needed and enough time has passed
     if (needsDisplayUpdate && (currentTime - lastDisplayUpdate) >= DISPLAY_UPDATE_INTERVAL) {
         updateDisplay();
         needsDisplayUpdate = false;
@@ -90,18 +99,65 @@ void loop() {
     delay(1);  // Small delay for stability
 }
 
+void updateAnimation() {
+    // Smoothly animate current value toward target value
+    float difference = targetProgressValue - currentProgressValue;
+
+    if (abs(difference) > 0.1f) {
+        // Use adaptive speed - faster for larger differences
+        float adaptiveSpeed = ANIMATION_SPEED;
+
+        // Scale speed based on distance (faster for big jumps)
+        float distance = abs(difference);
+        if (distance > 20) {
+            adaptiveSpeed *= 2.0f;  // Double speed for large changes
+        } else if (distance > 10) {
+            adaptiveSpeed *= 1.5f;  // 1.5x speed for medium changes
+        }
+
+        // Calculate movement direction and amount
+        float direction = (difference > 0) ? 1.0f : -1.0f;
+        float movement = min(adaptiveSpeed, abs(difference)) * direction;
+
+        // Move toward target
+        currentProgressValue += movement;
+
+        // Snap to target if very close (prevents endless tiny movements)
+        if (abs(targetProgressValue - currentProgressValue) < 0.5f) {
+            currentProgressValue = targetProgressValue;
+        }
+
+        // Flag for display update
+        needsDisplayUpdate = true;
+
+        // Reduced debug output (only for significant changes)
+        if (abs(movement) > 1.0f) {
+            Serial.printf("Animating: %.1f%% -> %d%% (speed: %.1f)\n",
+                          currentProgressValue, targetProgressValue, adaptiveSpeed);
+        }
+    }
+}
+
 void updateDisplay() {
     // Update the e-paper display progress bar
     UI& ui = UI::getInstance();
 
     // Use partial update for fast refresh (if supported)
-    // Force full update every 20 updates to prevent ghosting
+    // Force full update every 30 updates to prevent ghosting (increased frequency)
     static int updateCount = 0;
+    static int lastDisplayedValue = -1;
     updateCount++;
-    bool forceFullUpdate = (updateCount % 20 == 0);
 
-    ui.updateProgressBar(progressValue, forceFullUpdate);
+    // Convert float to int for display
+    int displayValue = (int)round(currentProgressValue);
 
-    // Also show in serial for debugging
-    Serial.printf("Display updated: %d%%\n", progressValue);
+    // Only update if value actually changed (reduces unnecessary updates)
+    if (displayValue != lastDisplayedValue) {
+        bool forceFullUpdate = (updateCount % 30 == 0);
+        ui.updateProgressBar(displayValue, forceFullUpdate);
+        lastDisplayedValue = displayValue;
+
+        // Reduced debug output
+        Serial.printf("Display: %d%%\n", displayValue);
+    }
 }
