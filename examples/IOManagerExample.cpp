@@ -96,7 +96,7 @@ void loop() {
 
     // Example of specific device access
     static unsigned long lastCheck = 0;
-    if (millis() - lastCheck > 10000) {  // Check every second
+    if (millis() - lastCheck > 1000) {  // Check every second
         lastCheck = millis();
 
         // Access specific devices by name
@@ -122,7 +122,7 @@ void loop() {
         Serial.println("Some input device has new input!");
 
         // Clear all input flags at once
-        IO::getInstance().clearAllInputFlags();
+        // IO::getInstance().clearAllInputFlags();
     }
 
     delay(10);  // Small delay for stability
@@ -130,28 +130,45 @@ void loop() {
 
 // Alternative example showing dynamic device management
 void alternativeExample() {
-    // IO& io = IO::getInstance();
+    IO& io = IO::getInstance();
 
-    // Serial.println("\n=== Dynamic Device Management Example ===");
+    Serial.println("\n=== Dynamic Device Management Example ===");
 
-    // // Add devices dynamically
-    // auto encoder1 = RotaryEncoder::create("dynamic_encoder", {});
-    // auto button3 = Button::create("dynamic_button", {.pin = 13});
+    // Add devices dynamically using factory methods
+    RotaryEncoder::Config dynamicEncoderConfig;
+    dynamicEncoderConfig.pinA = 18;
+    dynamicEncoderConfig.pinB = 19;
+    dynamicEncoderConfig.hasButton = false;
 
-    // // Add to manager
-    // io.addDevice(std::move(encoder1));
-    // io.addDevice(std::move(button3));
+    Button::Config dynamicButtonConfig;
+    dynamicButtonConfig.pin = 13;
 
-    // // Later, remove a device
-    // if (io.hasDevice("dynamic_button")) {
-    //     Serial.println("Removing dynamic button");
-    //     io.removeDevice("dynamic_button");
-    // }
+    auto encoder1 = RotaryEncoder::create("dynamic_encoder", dynamicEncoderConfig);
+    auto button3 = Button::create("dynamic_button", dynamicButtonConfig);
 
-    // // Get all devices of a specific type
-    // auto allEncoders = io.getDevicesOfType<RotaryEncoder>();
-    // Serial.printf("Found %d rotary encoders\n", allEncoders.size());
+    // Add to manager
+    io.addDevice(std::move(encoder1));
+    io.addDevice(std::move(button3));
 
-    // auto allButtons = io.getDevicesOfType<Button>();
-    // Serial.printf("Found %d buttons\n", allButtons.size());
+    // Later, remove a device
+    if (io.hasDevice("dynamic_button")) {
+        Serial.println("Removing dynamic button");
+        io.removeDevice("dynamic_button");
+    }
+
+    // Get all devices of a specific type - multiple ways
+
+    // Method 1: Template method (generic)
+    auto allEncoders = io.getDevicesOfType<RotaryEncoder>();
+    Serial.printf("Found %d rotary encoders (template method)\n", allEncoders.size());
+
+    auto allButtons = io.getDevicesOfType<Button>();
+    Serial.printf("Found %d buttons (template method)\n", allButtons.size());
+
+    // Method 2: Type-specific methods (simpler, no templates)
+    auto encoders = io.getRotaryEncoders();
+    Serial.printf("Found %d rotary encoders (direct method)\n", encoders.size());
+
+    auto buttons = io.getButtons();
+    Serial.printf("Found %d buttons (direct method)\n", buttons.size());
 }

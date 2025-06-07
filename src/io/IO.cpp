@@ -1,27 +1,13 @@
 #include "IO.hpp"
 #include <Arduino.h>
+#include <type_traits>
+#include <memory>
 
 // Initialize static member
 IO* IO::instance = nullptr;
 
 // Private constructor
-IO::IO() : encoderPinA(DEFAULT_ENCODER_PIN_A),
-           encoderPinB(DEFAULT_ENCODER_PIN_B),
-           buttonPin(DEFAULT_BUTTON_PIN),
-           initialized(false),
-           lastEncoderPosition(0),
-           encoderDelta(0),
-           encoderReversed(false),
-           pullupsEnabled(true),
-           buttonState(false),
-           lastButtonState(false),
-           buttonPressed(false),
-           buttonReleased(false),
-           lastButtonChange(0),
-           buttonDebounceTime(DEFAULT_DEBOUNCE_TIME),
-           newInputAvailable(false),
-           encoderCallback(nullptr),
-           buttonCallback(nullptr) {
+IO::IO() : initialized(false) {
     // Constructor implementation
 }
 
@@ -56,8 +42,10 @@ void IO::destroyInstance() {
 // Initialize the IO system
 void IO::initialize() {
     if (!initialized) {
-        setupEncoder();
-        setupButton();
+        // Initialize all devices
+        for (auto& device : devices) {
+            device->initialize();
+        }
         initialized = true;
     }
 }
@@ -65,6 +53,10 @@ void IO::initialize() {
 // Shutdown the IO system
 void IO::shutdown() {
     if (initialized) {
+        // Shutdown all devices
+        for (auto& device : devices) {
+            device->shutdown();
+        }
         initialized = false;
     }
 }
@@ -73,181 +65,186 @@ void IO::shutdown() {
 void IO::update() {
     if (!initialized) return;
 
-    updateEncoder();
-    updateButton();
+    // Update all devices and check for new input
+    for (auto& device : devices) {
+        device->update();
+
+        // Call global callback if device has new input
+        if (device->hasNewInput() && globalCallback) {
+            globalCallback(device->getId(), device->getType());
+        }
+    }
 }
 
-// Rotary encoder methods
-long IO::getEncoderPosition() {
-    if (!initialized) return 0;
-    return encoder.getCount();
+// Device management methods
+template <typename T>
+T* IO::addDevice(std::unique_ptr<T> device) {
+    if (!device) return nullptr;
+
+    // Check if device ID already exists
+    if (hasDevice(device->getId())) {
+        return nullptr;  // Device ID must be unique
+    }
+
+    T* rawPtr = device.get();
+    size_t index = devices.size();
+
+    devices.push_back(std::move(device));
+    deviceMap[rawPtr->getId()] = index;
+
+    // If already initialized, initialize the new device
+    if (initialized) {
+        rawPtr->initialize();
+    }
+
+    return rawPtr;
 }
 
-int IO::getEncoderDelta() {
-    if (!initialized) return 0;
-    return encoderDelta;
+InputDevice* IO::getDevice(const String& deviceId) {
+    auto it = deviceMap.find(deviceId);
+    if (it != deviceMap.end()) {
+        return devices[it->second].get();
+    }
+    return nullptr;
 }
 
-void IO::resetEncoder() {
-    if (!initialized) return;
-    encoder.clearCount();
-    lastEncoderPosition = 0;
-    encoderDelta = 0;
+bool IO::removeDevice(const String& deviceId) {
+    auto it = deviceMap.find(deviceId);
+    if (it != deviceMap.end()) {
+        size_t indexToRemove = it->second;
+
+        // Shutdown device before removal
+        devices[indexToRemove]->shutdown();
+
+        // Remove from vector (this invalidates indices)
+        devices.erase(devices.begin() + indexToRemove);
+
+        // Rebuild deviceMap since indices changed
+        deviceMap.clear();
+        for (size_t i = 0; i < devices.size(); ++i) {
+            deviceMap[devices[i]->getId()] = i;
+        }
+
+        return true;
+    }
+    return false;
 }
 
-bool IO::isEncoderButtonPressed() {
-    return buttonState;
+bool IO::hasDevice(const String& deviceId) {
+    return deviceMap.find(deviceId) != deviceMap.end();
 }
 
-bool IO::wasEncoderButtonPressed() {
-    bool result = buttonPressed;
-    buttonPressed = false;  // Clear flag after reading
+// Convenience methods for common device types
+RotaryEncoder* IO::addRotaryEncoder(const String& deviceId, const RotaryEncoder::Config& config) {
+    return addDevice(std::unique_ptr<RotaryEncoder>(new RotaryEncoder(deviceId, config)));
+}
+
+Button* IO::addButton(const String& deviceId, const Button::Config& config) {
+    return addDevice(std::unique_ptr<Button>(new Button(deviceId, config)));
+}
+
+RotaryEncoder* IO::getRotaryEncoder(const String& deviceId) {
+    auto it = deviceMap.find(deviceId);
+    if (it != deviceMap.end()) {
+        InputDevice* device = devices[it->second].get();
+        if (device->getType() == InputDevice::DeviceType::ENCODER) {
+            return static_cast<RotaryEncoder*>(device);
+        }
+    }
+    return nullptr;
+}
+
+Button* IO::getButton(const String& deviceId) {
+    auto it = deviceMap.find(deviceId);
+    if (it != deviceMap.end()) {
+        InputDevice* device = devices[it->second].get();
+        if (device->getType() == InputDevice::DeviceType::BUTTON) {
+            return static_cast<Button*>(device);
+        }
+    }
+    return nullptr;
+}
+
+// Get devices by type
+std::vector<RotaryEncoder*> IO::getRotaryEncoders() {
+    std::vector<RotaryEncoder*> result;
+    for (auto& device : devices) {
+        if (device->getType() == InputDevice::DeviceType::ENCODER) {
+            result.push_back(static_cast<RotaryEncoder*>(device.get()));
+        }
+    }
     return result;
 }
 
-bool IO::wasEncoderButtonReleased() {
-    bool result = buttonReleased;
-    buttonReleased = false;  // Clear flag after reading
+std::vector<Button*> IO::getButtons() {
+    std::vector<Button*> result;
+    for (auto& device : devices) {
+        if (device->getType() == InputDevice::DeviceType::BUTTON) {
+            result.push_back(static_cast<Button*>(device.get()));
+        }
+    }
     return result;
 }
 
-// Input state methods
+// Template method for getting devices of specific type
+template <typename T>
+std::vector<T*> IO::getDevicesOfType() {
+    std::vector<T*> result;
+    for (auto& device : devices) {
+        T* typedDevice = dynamic_cast<T*>(device.get());
+        if (typedDevice) {
+            result.push_back(typedDevice);
+        }
+    }
+    return result;
+}
+
+// Global input state methods
 bool IO::hasNewInput() {
-    return newInputAvailable;
-}
-
-void IO::clearInputFlags() {
-    newInputAvailable = false;
-    buttonPressed = false;
-    buttonReleased = false;
-    encoderDelta = 0;
-}
-
-// Encoder configuration
-void IO::setEncoderPins(int pinA, int pinB, int buttonPin) {
-    if (initialized) return;  // Can't change pins after initialization
-
-    encoderPinA = pinA;
-    encoderPinB = pinB;
-    this->buttonPin = buttonPin;
-}
-
-void IO::setEncoderReversed(bool reversed) {
-    encoderReversed = reversed;
-}
-
-void IO::enablePullups(bool enable) {
-    pullupsEnabled = enable;
-}
-
-// Debouncing configuration
-void IO::setButtonDebounceTime(unsigned long debounceMs) {
-    buttonDebounceTime = debounceMs;
-}
-
-// Events callback
-void IO::setEncoderCallback(EncoderCallback callback) {
-    encoderCallback = callback;
-}
-
-void IO::setButtonCallback(ButtonCallback callback) {
-    buttonCallback = callback;
-}
-
-// Private methods
-void IO::setupEncoder() {
-    // Enable pullups if requested
-    if (pullupsEnabled) {
-        pinMode(encoderPinA, INPUT_PULLUP);
-        pinMode(encoderPinB, INPUT_PULLUP);
-    } else {
-        pinMode(encoderPinA, INPUT);
-        pinMode(encoderPinB, INPUT);
-    }
-
-    // Initialize ESP32Encoder
-    ESP32Encoder::useInternalWeakPullResistors = pullupsEnabled ? puType::up : puType::none;
-    encoder.attachFullQuad(encoderPinA, encoderPinB);
-    encoder.clearCount();
-
-    lastEncoderPosition = 0;
-    encoderDelta = 0;
-}
-
-void IO::setupButton() {
-    if (pullupsEnabled) {
-        pinMode(buttonPin, INPUT_PULLUP);
-    } else {
-        pinMode(buttonPin, INPUT);
-    }
-
-    // Initialize button state
-    buttonState = readButtonRaw();
-    lastButtonState = buttonState;
-    buttonPressed = false;
-    buttonReleased = false;
-    lastButtonChange = millis();
-}
-
-void IO::updateEncoder() {
-    long currentPosition = encoder.getCount();
-
-    // Apply direction reversal if needed
-    if (encoderReversed) {
-        currentPosition = -currentPosition;
-    }
-
-    // Calculate delta
-    int delta = (int)(currentPosition - lastEncoderPosition);
-
-    if (delta != 0) {
-        encoderDelta = delta;
-        lastEncoderPosition = currentPosition;
-        newInputAvailable = true;
-
-        // Call callback if set
-        if (encoderCallback) {
-            encoderCallback(delta);
+    for (auto& device : devices) {
+        if (device->hasNewInput()) {
+            return true;
         }
     }
+    return false;
 }
 
-void IO::updateButton() {
-    unsigned long currentTime = millis();
-    bool currentButtonReading = readButtonRaw();
-
-    // Debouncing logic
-    if (currentButtonReading != lastButtonState) {
-        lastButtonChange = currentTime;
-    }
-
-    if ((currentTime - lastButtonChange) > buttonDebounceTime) {
-        // Button state has stabilized
-        if (currentButtonReading != buttonState) {
-            buttonState = currentButtonReading;
-            newInputAvailable = true;
-
-            if (buttonState) {
-                buttonPressed = true;
-            } else {
-                buttonReleased = true;
-            }
-
-            // Call callback if set
-            if (buttonCallback) {
-                buttonCallback(buttonState);
-            }
-        }
-    }
-
-    lastButtonState = currentButtonReading;
-}
-
-bool IO::readButtonRaw() {
-    // Button is active LOW when using pullups
-    if (pullupsEnabled) {
-        return !digitalRead(buttonPin);
-    } else {
-        return digitalRead(buttonPin);
+void IO::clearAllInputFlags() {
+    for (auto& device : devices) {
+        device->clearInputFlags();
     }
 }
+
+// Device iteration
+std::vector<InputDevice*> IO::getAllDevices() {
+    std::vector<InputDevice*> result;
+    for (auto& device : devices) {
+        result.push_back(device.get());
+    }
+    return result;
+}
+
+std::vector<String> IO::getDeviceIds() {
+    std::vector<String> result;
+    for (auto& device : devices) {
+        result.push_back(device->getId());
+    }
+    return result;
+}
+
+// Event system
+void IO::setGlobalInputCallback(GlobalInputCallback callback) {
+    globalCallback = callback;
+}
+
+// Private helper methods
+size_t IO::findDeviceIndex(const String& deviceId) {
+    auto it = deviceMap.find(deviceId);
+    return (it != deviceMap.end()) ? it->second : SIZE_MAX;
+}
+
+// Explicit template instantiations for common types
+template RotaryEncoder* IO::addDevice<RotaryEncoder>(std::unique_ptr<RotaryEncoder> device);
+template Button* IO::addDevice<Button>(std::unique_ptr<Button> device);
+template std::vector<RotaryEncoder*> IO::getDevicesOfType<RotaryEncoder>();
+template std::vector<Button*> IO::getDevicesOfType<Button>();

@@ -1,6 +1,12 @@
 #pragma once
 
-#include <ESP32Encoder.h>
+#include "InputDevice.hpp"
+#include "RotaryEncoder.hpp"
+#include "Button.hpp"
+#include <vector>
+#include <memory>
+#include <map>
+#include <functional>
 
 class IO {
    private:
@@ -32,73 +38,49 @@ class IO {
     void shutdown();
     void update();
 
-    // Rotary encoder methods
-    long getEncoderPosition();
-    int getEncoderDelta();
-    void resetEncoder();
-    bool isEncoderButtonPressed();
-    bool wasEncoderButtonPressed();   // Returns true once per press
-    bool wasEncoderButtonReleased();  // Returns true once per release
+    // Device management methods
+    template <typename T>
+    T* addDevice(std::unique_ptr<T> device);
 
-    // Input state methods
+    InputDevice* getDevice(const String& deviceId);
+    bool removeDevice(const String& deviceId);
+    bool hasDevice(const String& deviceId);
+
+    // Convenience methods for common device types
+    RotaryEncoder* addRotaryEncoder(const String& deviceId, const RotaryEncoder::Config& config = {});
+    Button* addButton(const String& deviceId, const Button::Config& config);
+
+    RotaryEncoder* getRotaryEncoder(const String& deviceId);
+    Button* getButton(const String& deviceId);
+
+    // Get devices by type
+    std::vector<RotaryEncoder*> getRotaryEncoders();
+    std::vector<Button*> getButtons();
+
+    // Template method for getting devices of specific type
+    template <typename T>
+    std::vector<T*> getDevicesOfType();
+
+    // Global input state methods
     bool hasNewInput();
-    void clearInputFlags();
+    void clearAllInputFlags();
 
-    // Encoder configuration
-    void setEncoderPins(int pinA, int pinB, int buttonPin);
-    void setEncoderReversed(bool reversed);
-    void enablePullups(bool enable);
+    // Device iteration
+    std::vector<InputDevice*> getAllDevices();
+    std::vector<String> getDeviceIds();
 
-    // Debouncing configuration
-    void setButtonDebounceTime(unsigned long debounceMs);
-
-    // Events callback (optional)
-    typedef void (*EncoderCallback)(int delta);
-    typedef void (*ButtonCallback)(bool pressed);
-    void setEncoderCallback(EncoderCallback callback);
-    void setButtonCallback(ButtonCallback callback);
+    // Event system
+    using GlobalInputCallback = std::function<void(const String& deviceId, InputDevice::DeviceType type)>;
+    void setGlobalInputCallback(GlobalInputCallback callback);
 
    private:
-    // Rotary encoder instance
-    ESP32Encoder encoder;
+    // Device storage
+    std::vector<std::unique_ptr<InputDevice>> devices;
+    std::map<String, size_t> deviceMap;  // deviceId -> index in devices vector
 
-    // Pin definitions
-    int encoderPinA;
-    int encoderPinB;
-    int buttonPin;
-
-    // Internal state
     bool initialized;
-    long lastEncoderPosition;
-    int encoderDelta;
-    bool encoderReversed;
-    bool pullupsEnabled;
+    GlobalInputCallback globalCallback;
 
-    // Button state management
-    bool buttonState;
-    bool lastButtonState;
-    bool buttonPressed;
-    bool buttonReleased;
-    unsigned long lastButtonChange;
-    unsigned long buttonDebounceTime;
-
-    // Input flags
-    bool newInputAvailable;
-
-    // Callbacks
-    EncoderCallback encoderCallback;
-    ButtonCallback buttonCallback;
-
-    // Internal methods
-    void setupEncoder();
-    void setupButton();
-    void updateEncoder();
-    void updateButton();
-    bool readButtonRaw();
-
-    // Default pin assignments (can be changed via setEncoderPins)
-    static const int DEFAULT_ENCODER_PIN_A = 32;
-    static const int DEFAULT_ENCODER_PIN_B = 33;
-    static const int DEFAULT_BUTTON_PIN = 25;
-    static const unsigned long DEFAULT_DEBOUNCE_TIME = 50;  // milliseconds
+    // Helper methods
+    size_t findDeviceIndex(const String& deviceId);
 };
